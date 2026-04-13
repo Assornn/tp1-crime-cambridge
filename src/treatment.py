@@ -1,129 +1,121 @@
 """
 Section 3 — Traitement et nettoyage des données.
+Logique alignée sur la correction officielle.
 """
 import logging
 import pandas as pd
 import numpy as np
 
-from quality import (
-    VALID_NEIGHBORHOODS,
-    _parse_date,
-    _extract_crime_start,
-    _is_reporting_area_valid,
-)
-
 logger = logging.getLogger(__name__)
 
+VALID_NEIGHBORHOODS = {
+    "Cambridgeport", "East Cambridge", "Mid-Cambridge", "North Cambridge",
+    "Riverside", "Area 4", "West Cambridge", "Peabody", "Inman/Harrington",
+    "Highlands", "Agassiz", "MIT", "Strawberry Hill",
+}
 
-def appliquer_traitements(df_original: pd.DataFrame) -> pd.DataFrame:
-    """
-    Applique l'ensemble des règles de traitement sur une copie du dataframe.
-    Retourne le dataframe nettoyé.
-    """
+VALID_GROUP_MIN, VALID_GROUP_MAX = 1, 13
+
+
+def parse_report_datetime(s):
+    return pd.to_datetime(s, errors="coerce", format="%m/%d/%Y %I:%M:%S %p")
+
+
+def extract_crime_start_datetime(s):
+    start = s.astype("string").str.split(" - ").str[0].str.strip()
+    dt = pd.to_datetime(start, errors="coerce", format="%m/%d/%Y %H:%M")
+    return dt.fillna(pd.to_datetime(start, errors="coerce"))
+
+
+def extract_reporting_area_group(series):
+    num = pd.to_numeric(series, errors="coerce")
+    return (num // 100).astype("Int64")
+
+
+def appliquer_traitements(df_original):
     df = df_original.copy()
     initial_len = len(df)
-    logger.info("Début du traitement — %d lignes initiales", initial_len)
+    logger.info("Debut du traitement — %d lignes initiales", initial_len)
 
-    # ── 1. Doublons exacts ──────────────────────────────────────────────────
-    # Décision : on conserve la première occurrence, les autres sont supprimées.
-    # Justification : un dossier de crime ne peut pas être enregistré deux fois
-    #                 avec exactement les mêmes données ; doublon = double saisie.
+    # 1. Doublons sur File Number
     n_before = len(df)
-    df = df.drop_duplicates(keep="first").reset_index(drop=True)
+    df = df.drop_duplicates(subset=["File Number"], keep="first").reset_index(drop=True)
     n_removed = n_before - len(df)
-    logger.info("Doublons exacts supprimés : %d lignes", n_removed)
-    print(f"  [1] Doublons exacts supprimés          : {n_removed:>5} lignes")
+    logger.info("Doublons File Number supprimes : %d", n_removed)
+    print(f"  [1] Doublons File Number supprimes     : {n_removed:>5} lignes")
 
-    # ── 2. Crime null ────────────────────────────────────────────────────────
-    # Décision : suppression des lignes sans type de crime.
-    # Justification : sans catégorie de crime, la ligne est inexploitable pour
-    #                 tout indicateur criminel (carte, statistiques, …).
+    # 2. Crime null
     n_before = len(df)
     df = df.dropna(subset=["Crime"]).reset_index(drop=True)
     n_removed = n_before - len(df)
-    logger.info("Lignes sans crime supprimées : %d", n_removed)
-    print(f"  [2] Lignes sans 'Crime' supprimées     : {n_removed:>5} lignes")
+    logger.info("Lignes sans crime supprimees : %d", n_removed)
+    print(f"  [2] Lignes sans Crime supprimees       : {n_removed:>5} lignes")
 
-    # ── 3. Date of Report invalide ───────────────────────────────────────────
-    # Décision : suppression des lignes avec date non parsable.
-    # Justification : la date de signalement est une dimension d'analyse
-    #                 temporelle essentielle ; on ne peut pas l'inférer.
-    df["_report_dt"] = df["Date of Report"].apply(_parse_date)
-    n_before = len(df)
-    df = df[df["_report_dt"].notna()].reset_index(drop=True)
-    n_removed = n_before - len(df)
-    logger.info("Dates de report invalides supprimées : %d", n_removed)
-    print(f"  [3] Dates de report invalides supp.    : {n_removed:>5} lignes")
+    # 3. Date of Report invalide -> NaN
+    report_dt = parse_report_datetime(df["Date of Report"])
+    n_invalid = report_dt.isna().sum()
+    df.loc[report_dt.isna(), "Date of Report"] = np.nan
+    print(f"  [3] Dates invalides -> NaN             : {n_invalid:>5} lignes")
 
-    # ── 4. Date of Report antérieure au début de Crime Date Time ─────────────
-    # Décision : suppression.
-    # Justification : un crime ne peut pas être signalé avant d'avoir commencé ;
-    #                 incohérence logique irréparable sans source supplémentaire.
-    df["_crime_start"] = df["Crime Date Time"].apply(_extract_crime_start)
-    both_valid = df["_report_dt"].notna() & df["_crime_start"].notna()
-    incoherent = (df["_report_dt"] < df["_crime_start"]) & both_valid
-    n_before = len(df)
-    df = df[~incoherent].reset_index(drop=True)
-    n_removed = n_before - len(df)
-    logger.info("Incohérences temporelles supprimées : %d", n_removed)
-    print(f"  [4] Incohérences temporelles supp.     : {n_removed:>5} lignes")
+    # 4. Incoherence temporelle -> NaN
+    crime_dt = extract_crime_start_datetime(df["Crime Date Time"])
+    report_dt = parse_report_datetime(df["Date of Report"])
+    mask = report_dt.notna() & crime_dt.notna() & (report_dt < crime_dt)
+    df.loc[mask, "Date of Report"] = np.nan
+    print(f"  [4] Incoherences temporelles -> NaN    : {int(mask.sum()):>5} lignes")
 
-    # Nettoyage colonnes temporaires de travail
-    df = df.drop(columns=["_report_dt", "_crime_start"])
+    # 5. Imputation Date of Report depuis File Number
+    mask_missing = df["Date of Report"].isna()
+    year = df.loc[mask_missing, "File Number"].astype(str).str[:4]
+    imputed = pd.to_datetime(year + "-12-31 23:59:59", errors="coerce")
+    df.loc[mask_missing, "Date of Report"] = imputed.dt.strftime("%m/%d/%Y %I:%M:%S %p")
+    print(f"  [5] Dates imputees (31/12/YYYY)        : {int(mask_missing.sum()):>5} lignes")
 
-    # ── 5. Reporting Area invalide ───────────────────────────────────────────
-    # Décision : mise à NaN des valeurs invalides, puis suppression des lignes.
-    # Justification : une zone négative ou non numérique est une erreur de saisie ;
-    #                 on ne peut pas inférer la valeur correcte.
-    invalid_area = ~df["Reporting Area"].apply(_is_reporting_area_valid)
-    n_invalid = invalid_area.sum()
-    df.loc[invalid_area, "Reporting Area"] = np.nan
-    n_before = len(df)
-    df = df.dropna(subset=["Reporting Area"]).reset_index(drop=True)
-    n_removed = n_before - len(df)
-    logger.info("Reporting Area invalides mis à NaN puis supprimés : %d", n_invalid)
-    print(f"  [5] Reporting Area invalides supp.     : {n_removed:>5} lignes")
+    # 6. Reporting Area invalide -> NaN
+    area_num = pd.to_numeric(df["Reporting Area"], errors="coerce")
+    n_invalid = area_num.isna().sum()
+    df.loc[area_num.isna(), "Reporting Area"] = pd.NA
+    df["Reporting Area"] = pd.to_numeric(df["Reporting Area"], errors="coerce")
+    print(f"  [6] Reporting Area invalides -> NaN    : {n_invalid:>5} lignes")
 
-    # Conversion en int (maintenant sûr)
-    df["Reporting Area"] = df["Reporting Area"].apply(lambda x: int(float(x)))
-
-    # ── 6. Neighborhood invalide ─────────────────────────────────────────────
-    # Décision : mise à NaN des valeurs hors référentiel, puis suppression.
-    # Justification : seuls les 13 quartiers du référentiel officiel ont une
-    #                 signification cartographique exploitable.
+    # 7. Neighborhood hors referentiel -> NaN
+    df["Neighborhood"] = df["Neighborhood"].astype("string").str.strip()
     invalid_hood = ~df["Neighborhood"].isin(VALID_NEIGHBORHOODS)
     n_invalid = invalid_hood.sum()
-    df.loc[invalid_hood, "Neighborhood"] = np.nan
-    n_before = len(df)
-    df = df.dropna(subset=["Neighborhood"]).reset_index(drop=True)
-    n_removed = n_before - len(df)
-    logger.warning("Neighborhoods invalides mis à NaN puis supprimés : %d", n_invalid)
-    print(f"  [6] Neighborhoods invalides supp.      : {n_removed:>5} lignes")
+    df.loc[invalid_hood, "Neighborhood"] = pd.NA
+    print(f"  [7] Neighborhoods invalides -> NaN     : {n_invalid:>5} lignes")
 
-    # ── 7. Enrichissement : reporting_area_group ──────────────────────────────
-    # Extraction du groupe de centaines (ex : 602 → 6 ; 1109 → 11)
-    df["reporting_area_group"] = df["Reporting Area"] // 100
+    # 8. reporting_area_group
+    df["reporting_area_group"] = extract_reporting_area_group(df["Reporting Area"])
+    invalid_group = (
+        df["reporting_area_group"].isna() |
+        (df["reporting_area_group"] < VALID_GROUP_MIN) |
+        (df["reporting_area_group"] > VALID_GROUP_MAX)
+    )
+    n_aberrant = int(invalid_group.sum())
+    df.loc[invalid_group, "reporting_area_group"] = pd.NA
+    print(f"  [8] reporting_area_group aberrants     : {n_aberrant:>5} lignes")
 
-    # Vérification des valeurs aberrantes (négatif ou > 20 = invraisemblable)
-    aberrant = (df["reporting_area_group"] <= 0) | (df["reporting_area_group"] > 20)
-    n_aberrant = aberrant.sum()
-    if n_aberrant > 0:
-        logger.warning("reporting_area_group aberrants neutralisés : %d", n_aberrant)
-        df.loc[aberrant, "reporting_area_group"] = np.nan
-    print(f"  [7] reporting_area_group créé — aberrants neutralisés : {n_aberrant}")
+    # 9. Imputation Neighborhood via reporting_area_group
+    group_to_neighborhood = (
+        df.dropna(subset=["reporting_area_group", "Neighborhood"])
+        .groupby("reporting_area_group")["Neighborhood"]
+        .agg(lambda s: s.value_counts().idxmax())
+        .to_dict()
+    )
+    mask_missing_neigh = df["Neighborhood"].isna() & df["reporting_area_group"].notna()
+    df.loc[mask_missing_neigh, "Neighborhood"] = (
+        df.loc[mask_missing_neigh, "reporting_area_group"].map(group_to_neighborhood)
+    )
+    print(f"  [9] Neighborhoods imputes              : {int(mask_missing_neigh.sum()):>5} lignes")
 
     final_len = len(df)
     total_removed = initial_len - final_len
-    print(f"\n  ✅ Dataset nettoyé : {final_len:,} lignes conservées "
-          f"({total_removed:,} supprimées, {total_removed/initial_len*100:.1f}%)")
-
-    logger.info("Traitement terminé — %d lignes finales (%d supprimées)",
-                final_len, total_removed)
+    print(f"\n  Dataset final : {final_len:,} lignes ({total_removed:,} supprimees, {total_removed/initial_len*100:.1f}%)")
     return df
 
 
-def exporter_csv(df: pd.DataFrame, path: str) -> None:
-    """Exporte le dataset nettoyé en CSV."""
+def exporter_csv(df, path):
     df.to_csv(path, index=False)
-    logger.info("Dataset exporté → %s", path)
-    print(f"\n  💾 Export : {path}")
+    logger.info("Dataset exporte -> %s", path)
+    print(f"\n  Export : {path}")

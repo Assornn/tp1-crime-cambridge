@@ -21,9 +21,9 @@ NEIGHBORHOOD_TO_GEOJSON_NAME = {
     "Riverside":        "Riverside",
     "West Cambridge":   "West Cambridge",
     "Peabody":          "Neighborhood Nine",        # Peabody = Neighborhood Nine
-    "Inman/Harrington": "Wellington-Harrington",    # correspondance approx.
+    "Inman/Harrington": "Baldwin",
     "Highlands":        "Cambridge Highlands",
-    "Agassiz":          "Agassiz",
+    "Agassiz":          "Wellington-Harrington",
     "MIT":              "Area 2/MIT",
     "Strawberry Hill":  "Strawberry Hill",
 }

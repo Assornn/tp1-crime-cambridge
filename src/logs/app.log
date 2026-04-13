@@ -1,0 +1,17 @@
+2026-04-13 10:59:31,021 - INFO - ========== DÉMARRAGE DU PIPELINE TP1 ==========
+2026-04-13 10:59:31,042 - INFO - === SECTION 1 — Profilage et exploration ===
+2026-04-13 10:59:31,063 - INFO - Profilage terminé — 10506 lignes, 7 colonnes
+2026-04-13 10:59:32,862 - INFO - Début du traitement — 10506 lignes initiales
+2026-04-13 10:59:32,868 - INFO - Doublons exacts supprimés : 204 lignes
+2026-04-13 10:59:32,871 - INFO - Lignes sans crime supprimées : 525
+2026-04-13 10:59:33,488 - INFO - Dates de report invalides supprimées : 94
+2026-04-13 10:59:34,091 - INFO - Incohérences temporelles supprimées : 380
+2026-04-13 10:59:34,100 - INFO - Reporting Area invalides mis à NaN puis supprimés : 117
+2026-04-13 10:59:34,109 - WARNING - Neighborhoods invalides mis à NaN puis supprimés : 817
+2026-04-13 10:59:34,112 - WARNING - reporting_area_group aberrants neutralisés : 19
+2026-04-13 10:59:34,113 - INFO - Traitement terminé — 8369 lignes finales (2137 supprimées)
+2026-04-13 10:59:34,144 - INFO - Dataset exporté → C:\Users\abraure\OneDrive - orchestra-premaman\Documents\tp1_crime\output\crime_reports_clean.csv
+2026-04-13 10:59:35,546 - INFO - === SECTION 5 — Cartographie ===
+2026-04-13 10:59:35,738 - WARNING - Quartiers GeoJSON sans crimes : ['Baldwin']
+2026-04-13 10:59:35,816 - INFO - Carte exportée → C:\Users\abraure\OneDrive - orchestra-premaman\Documents\tp1_crime\output\map.html
+2026-04-13 10:59:35,817 - INFO - ========== PIPELINE TERMINÉ ==========
